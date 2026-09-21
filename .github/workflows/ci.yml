@@ -1,0 +1,151 @@
+name: CI
+
+# Workflow autonome pour un projet Node/TypeScript.
+# Il s'auto-adapte : détecte npm ou pnpm depuis le lockfile, lit .nvmrc s'il existe,
+# et n'exécute les étapes Prisma que si prisma/schema.prisma est présent.
+# Les scripts absents du package.json sont sautés (`--if-present`).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      pm: ${{ steps.detect.outputs.pm }}
+      node: ${{ steps.detect.outputs.node }}
+      lockfile: ${{ steps.detect.outputs.lockfile }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: detect
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "lockfile=pnpm-lock.yaml" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "lockfile=package-lock.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Aucun lockfile trouvé (package-lock.json ou pnpm-lock.yaml). Committe ton lockfile."
+            exit 1
+          fi
+
+          if [ -f .nvmrc ]; then
+            echo "node=$(tr -d 'v \n' < .nvmrc)" >> "$GITHUB_OUTPUT"
+          else
+            echo "node=22" >> "$GITHUB_OUTPUT"
+          fi
+
+  # lint / typecheck / build en parallèle : on voit immédiatement laquelle casse.
+  checks:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, build]
+    name: ${{ matrix.task }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        if: needs.prepare.outputs.pm == 'pnpm'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ needs.prepare.outputs.node }}
+          cache: ${{ needs.prepare.outputs.pm }}
+          cache-dependency-path: ${{ needs.prepare.outputs.lockfile }}
+
+      - name: Install
+        run: ${{ needs.prepare.outputs.pm == 'pnpm' && 'pnpm install --frozen-lockfile' || 'npm ci' }}
+
+      - name: Prisma generate
+        if: hashFiles('prisma/schema.prisma') != ''
+        run: ${{ needs.prepare.outputs.pm }} exec prisma generate
+
+      - name: ${{ matrix.task }}
+        run: ${{ needs.prepare.outputs.pm }} run --if-present ${{ matrix.task }}
+
+  test:
+    needs: prepare
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        if: needs.prepare.outputs.pm == 'pnpm'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ needs.prepare.outputs.node }}
+          cache: ${{ needs.prepare.outputs.pm }}
+          cache-dependency-path: ${{ needs.prepare.outputs.lockfile }}
+
+      - name: Install
+        run: ${{ needs.prepare.outputs.pm == 'pnpm' && 'pnpm install --frozen-lockfile' || 'npm ci' }}
+
+      - name: Prisma generate
+        if: hashFiles('prisma/schema.prisma') != ''
+        run: ${{ needs.prepare.outputs.pm }} exec prisma generate
+
+      - name: Migrations
+        if: hashFiles('prisma/migrations/**') != ''
+        run: ${{ needs.prepare.outputs.pm }} exec prisma migrate deploy
+
+      - name: Test
+        run: ${{ needs.prepare.outputs.pm }} run --if-present test
+
+  # Le hook husky ne protège que les machines locales : on revérifie côté serveur.
+  commitlint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Vérifie les messages de commit
+        run: |
+          npx --yes \
+            --package @commitlint/cli \
+            --package @commitlint/config-conventional \
+            -- commitlint \
+              --extends @commitlint/config-conventional \
+              --from "${{ github.event.pull_request.base.sha }}" \
+              --to "${{ github.event.pull_request.head.sha }}" \
+              --verbose
