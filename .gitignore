@@ -45,3 +45,6 @@ next-env.d.ts
 
 # cache brut Overpass (script de données)
 scripts/.cache/
+
+# IDE
+.idea/
