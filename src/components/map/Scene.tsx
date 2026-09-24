@@ -29,7 +29,11 @@ export default function Scene() {
         powerPreference: "high-performance",
       }}
       style={{ position: "absolute", inset: 0, touchAction: "none" }}
-      onPointerMissed={() => state.selectPoi(null)}
+      // Un tap sur la carte elle-même désélectionne ; pas un tap sur une étiquette DOM
+      // superposée (sinon l'ouverture d'un lieu serait annulée dans la foulée).
+      onPointerMissed={(event) => {
+        if (event.target instanceof HTMLCanvasElement) state.selectPoi(null);
+      }}
     >
       <MapStateContext.Provider value={state}>
         <SceneContent />
