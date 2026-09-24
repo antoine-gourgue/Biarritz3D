@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "prepare": "husky"
+    "prepare": "husky",
+    "data:fetch": "node scripts/fetch-biarritz-osm.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -22,13 +23,14 @@
     "@prisma/client": "^6.19.3",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
-    "3d-tiles-renderer": "^0.5.3",
+    "@react-three/postprocessing": "^3.1.2",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cn": "^0.3.2",
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
+    "postprocessing": "^6.39.5",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tailwind-merge": "^3.7.0",
@@ -55,6 +57,7 @@
     "husky": "^9.1.7",
     "jsdom": "^27.0.1",
     "lint-staged": "^17.5.1",
+    "osmtogeojson": "^3.0.0-beta.5",
     "prettier": "^3.9.8",
     "prisma": "^6.19.3",
     "shadcn": "^4.21.0",
